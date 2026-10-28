@@ -156,12 +156,10 @@ func syncOnce(serverURL, token, routerConf string, wifiVlan int, logLevel string
 		return fmt.Errorf("resolving organization id: %v", err)
 	}
 
-	// Interface name -> id, restricted to the daemon host.
-	ifaceIDs, err := c.interfaceIDsForHost("bpi-r1")
-	if err != nil {
-		return fmt.Errorf("resolving interfaces: %v", err)
-	}
-
+	// Note: interface (physical port) links are not set — the daemon
+	// never reports the router's own interfaces as scanopy objects, so
+	// they cannot be referenced from here. Scanopy's L2 port details
+	// for this board would need SNMP on a managed switch.
 	existingVlans, err := c.listVlans()
 	if err != nil {
 		return err
@@ -172,15 +170,7 @@ func syncOnce(serverURL, token, routerConf string, wifiVlan int, logLevel string
 	}
 
 	for _, t := range targets {
-		var ifaceUUIDs []string
-		for _, p := range t.Ports {
-			if id, ok := ifaceIDs[p]; ok {
-				ifaceUUIDs = append(ifaceUUIDs, id)
-			} else {
-				log.Printf("vlansync: interface %q not found in scanopy (vlan %d)", p, t.Number)
-			}
-		}
-		var subnetUUIDs []string
+		subnetUUIDs := []string{}
 		for _, cidr := range t.CIDRs {
 			if s, ok := byCIDR[cidr]; ok {
 				subnetUUIDs = append(subnetUUIDs, s.ID)
@@ -189,32 +179,30 @@ func syncOnce(serverURL, token, routerConf string, wifiVlan int, logLevel string
 
 		if old, ok := byNumber[t.Number]; ok {
 			// Only update when something actually changed.
-			if sameIDs(old.SubnetIDs, subnetUUIDs) && sameIDs(old.InterfaceIDs, ifaceUUIDs) && old.Name == t.Name {
+			if sameIDs(old.SubnetIDs, subnetUUIDs) && old.Name == t.Name {
 				log.Printf("vlansync: vlan %d (%s) already up to date", t.Number, t.Name)
 				continue
 			}
 			old.SubnetIDs = subnetUUIDs
-			old.InterfaceIDs = ifaceUUIDs
 			old.Name = t.Name
 			if err := c.updateVlan(old); err != nil {
 				return fmt.Errorf("updating vlan %d: %v", t.Number, err)
 			}
-			log.Printf("vlansync: updated vlan %d (%s): subnets=%v interfaces=%v", t.Number, t.Name, t.CIDRs, t.Ports)
+			log.Printf("vlansync: updated vlan %d (%s): subnets=%v", t.Number, t.Name, t.CIDRs)
 			continue
 		}
 		if err := c.createVlan(vlan{
-			VlanNumber:   t.Number,
-			Name:         t.Name,
-			SiteID:       siteID,
-			OrgID:        orgID,
-			Source:       map[string]any{"type": "Manual"},
-			SubnetIDs:    subnetUUIDs,
-			InterfaceIDs: ifaceUUIDs,
-			Tags:         []string{},
+			VlanNumber: t.Number,
+			Name:       t.Name,
+			SiteID:     siteID,
+			OrgID:      orgID,
+			Source:     map[string]any{"type": "Manual"},
+			SubnetIDs:  subnetUUIDs,
+			Tags:       []string{},
 		}); err != nil {
 			return fmt.Errorf("creating vlan %d: %v", t.Number, err)
 		}
-		log.Printf("vlansync: created vlan %d (%s): subnets=%v interfaces=%v", t.Number, t.Name, t.CIDRs, t.Ports)
+		log.Printf("vlansync: created vlan %d (%s): subnets=%v", t.Number, t.Name, t.CIDRs)
 	}
 	return nil
 }
