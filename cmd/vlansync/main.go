@@ -184,6 +184,9 @@ func syncOnce(serverURL, token, routerConf string, wifiVlan int, logLevel string
 				continue
 			}
 			old.SubnetIDs = subnetUUIDs
+			if old.InterfaceIDs == nil {
+				old.InterfaceIDs = []string{}
+			}
 			old.Name = t.Name
 			if err := c.updateVlan(old); err != nil {
 				return fmt.Errorf("updating vlan %d: %v", t.Number, err)
@@ -192,13 +195,14 @@ func syncOnce(serverURL, token, routerConf string, wifiVlan int, logLevel string
 			continue
 		}
 		if err := c.createVlan(vlan{
-			VlanNumber: t.Number,
-			Name:       t.Name,
-			SiteID:     siteID,
-			OrgID:      orgID,
-			Source:     map[string]any{"type": "Manual"},
-			SubnetIDs:  subnetUUIDs,
-			Tags:       []string{},
+			VlanNumber:   t.Number,
+			Name:         t.Name,
+			SiteID:       siteID,
+			OrgID:        orgID,
+			Source:       map[string]any{"type": "Manual"},
+			SubnetIDs:    subnetUUIDs,
+			InterfaceIDs: []string{},
+			Tags:         []string{},
 		}); err != nil {
 			return fmt.Errorf("creating vlan %d: %v", t.Number, err)
 		}
