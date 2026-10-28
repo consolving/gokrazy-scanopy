@@ -97,6 +97,17 @@ func (c *client) createVlan(v vlan) error {
 	return c.do("POST", "/api/v1/vlans", v, nil)
 }
 
+func (c *client) createSubnet(cidr, siteID, subnetType string) error {
+	body := map[string]any{
+		"cidr":        cidr,
+		"name":        cidr,
+		"site_id":     siteID,
+		"subnet_type": subnetType,
+		"source":      "Manual",
+	}
+	return c.do("POST", "/api/v1/subnets", body, nil)
+}
+
 func (c *client) updateVlan(v vlan) error {
 	return c.do("PUT", "/api/v1/vlans/"+v.ID, v, nil)
 }

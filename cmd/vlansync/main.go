@@ -48,6 +48,7 @@ type vlanTarget struct {
 	Name   string
 	CIDRs  []string // normalized networks, e.g. 10.0.1.0/24
 	Ports  []string // interface names, e.g. lan1
+	Wifi   bool     // true for the wifi subnet (subnet_type WiFi)
 }
 
 func main() {
@@ -98,34 +99,54 @@ func syncOnce(serverURL, token, routerConf string, wifiVlan int, logLevel string
 
 	c := &client{base: strings.TrimSuffix(serverURL, "/"), token: token, debug: logLevel == "debug"}
 
-	// Subnets discovered by the daemon; retry until all our CIDRs show up.
+	// Subnets discovered by the daemon; when one of our CIDRs is
+	// missing (it was deleted while the bridges were down), recreate it
+	// so the daemon picks it up as a scan target again.
 	subnets, err := c.listSubnets()
 	if err != nil {
 		return err
 	}
 	byCIDR := map[string]subnet{}
 	var siteID string
-	missing := []string{}
 	for _, s := range subnets {
 		byCIDR[s.CIDR] = s
+		if siteID == "" {
+			siteID = s.SiteID
+		}
 	}
+	missingTypes := map[string]string{}
+	missing := []string{}
 	for _, t := range targets {
+		st := "Lan"
+		if t.Wifi {
+			st = "WiFi"
+		}
 		for _, cidr := range t.CIDRs {
-			s, ok := byCIDR[cidr]
-			if !ok {
+			if _, ok := byCIDR[cidr]; !ok {
 				missing = append(missing, cidr)
-				continue
-			}
-			if siteID == "" {
-				siteID = s.SiteID
+				missingTypes[cidr] = st
+			} else if siteID == "" {
+				siteID = byCIDR[cidr].SiteID
 			}
 		}
 	}
-	if len(missing) > 0 {
-		return fmt.Errorf("subnets not yet discovered by the daemon: %s — retrying", strings.Join(missing, ", "))
-	}
 	if siteID == "" {
-		return fmt.Errorf("no site id found on target subnets")
+		return fmt.Errorf("no subnets at all — the daemon has never scanned anything")
+	}
+	if len(missing) > 0 {
+		for _, cidr := range missing {
+			if err := c.createSubnet(cidr, siteID, missingTypes[cidr]); err != nil {
+				return fmt.Errorf("creating missing subnet %s: %v", cidr, err)
+			}
+			log.Printf("vlansync: recreated missing subnet %s (%s)", cidr, missingTypes[cidr])
+		}
+		if subnets, err = c.listSubnets(); err != nil {
+			return err
+		}
+		byCIDR = map[string]subnet{}
+		for _, s := range subnets {
+			byCIDR[s.CIDR] = s
+		}
 	}
 
 	// The organization id is required by the Vlan model; take it from
@@ -238,6 +259,7 @@ func buildTargets(rc *routerConfig, wifiVlan int) ([]vlanTarget, error) {
 		for i := range out {
 			if out[i].Number == wifiVlan {
 				out[i].CIDRs = append(out[i].CIDRs, cidr)
+				out[i].Wifi = true
 				break
 			}
 		}
