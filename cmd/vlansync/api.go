@@ -79,12 +79,13 @@ type vlan struct {
 	ID           string   `json:"id,omitempty"`
 	VlanNumber   int      `json:"vlan_number"`
 	Name         string   `json:"name"`
-	Description  *string  `json:"description,omitempty"`
+	Description  *string  `json:"description"`
 	SiteID       string   `json:"site_id"`
 	OrgID        string   `json:"organization_id"`
 	Source       any      `json:"source,omitempty"`
 	SubnetIDs    []string `json:"subnet_ids"`
 	InterfaceIDs []string `json:"interface_ids"`
+	Tags         []string `json:"tags"`
 }
 
 func (c *client) listVlans() ([]vlan, error) {
@@ -99,11 +100,14 @@ func (c *client) createVlan(v vlan) error {
 
 func (c *client) createSubnet(cidr, siteID, subnetType string) error {
 	body := map[string]any{
-		"cidr":        cidr,
-		"name":        cidr,
-		"site_id":     siteID,
-		"subnet_type": subnetType,
-		"source":      map[string]any{"type": "Manual"},
+		"cidr":                      cidr,
+		"name":                      cidr,
+		"site_id":                   siteID,
+		"subnet_type":               subnetType,
+		"source":                    map[string]any{"type": "Manual"},
+		"description":               nil,
+		"virtualization_service_id": nil,
+		"tags":                      []string{},
 	}
 	return c.do("POST", "/api/v1/subnets", body, nil)
 }

@@ -210,6 +210,7 @@ func syncOnce(serverURL, token, routerConf string, wifiVlan int, logLevel string
 			Source:       map[string]any{"type": "Manual"},
 			SubnetIDs:    subnetUUIDs,
 			InterfaceIDs: ifaceUUIDs,
+			Tags:         []string{},
 		}); err != nil {
 			return fmt.Errorf("creating vlan %d: %v", t.Number, err)
 		}
