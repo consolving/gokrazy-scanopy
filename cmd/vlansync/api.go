@@ -116,17 +116,26 @@ func (c *client) updateVlan(v vlan) error {
 	return c.do("PUT", "/api/v1/vlans/"+v.ID, v, nil)
 }
 
-func (c *client) firstOrgID() (string, error) {
-	var orgs []struct {
-		ID string `json:"id"`
+// orgIDForSite resolves the organization a site belongs to. The
+// /api/v1/organizations endpoint requires an interactive user context
+// which api keys do not carry, but sites expose it directly.
+func (c *client) orgIDForSite(siteID string) (string, error) {
+	var sites []struct {
+		ID             string `json:"id"`
+		OrganizationID string `json:"organization_id"`
 	}
-	if err := c.do("GET", "/api/v1/organizations", nil, &orgs); err != nil {
+	if err := c.do("GET", "/api/v1/sites", nil, &sites); err != nil {
 		return "", err
 	}
-	if len(orgs) == 0 {
-		return "", fmt.Errorf("no organizations visible for this api key")
+	for _, s := range sites {
+		if s.ID == siteID {
+			if s.OrganizationID == "" {
+				return "", fmt.Errorf("site %s has no organization_id", siteID)
+			}
+			return s.OrganizationID, nil
+		}
 	}
-	return orgs[0].ID, nil
+	return "", fmt.Errorf("site %s not found", siteID)
 }
 
 type host struct {

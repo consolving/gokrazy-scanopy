@@ -149,9 +149,9 @@ func syncOnce(serverURL, token, routerConf string, wifiVlan int, logLevel string
 		}
 	}
 
-	// The organization id is required by the Vlan model; take it from
-	// the organizations endpoint (single-org setups are the norm).
-	orgID, err := c.firstOrgID()
+	// The organization id is required by the Vlan model; resolve it
+	// via the site the target subnets belong to.
+	orgID, err := c.orgIDForSite(siteID)
 	if err != nil {
 		return fmt.Errorf("resolving organization id: %v", err)
 	}
