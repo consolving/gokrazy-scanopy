@@ -65,6 +65,32 @@ a filename) — keep the real key out of git by maintaining it in
    (`daemon_poll`), name e.g. `bpi-r1`
 3. Copy the API key (shown only once) into `daemon-api-key`
 
+### VLAN-Sync (optional, empfohlen)
+
+Der zweite Service `cmd/vlansync` hält die VLAN-Modelle von Scanopy
+aktuell: er liest die VLAN-Konfiguration des Routers
+(`/etc/gokrazy-router.json`, staged aus der Instanz), wartet bis die
+Bridges und das Netz stehen und legt in Scanopy die VLANs samt
+Subnet- und Interface-Verknüpfung an (physische Darstellung). Das
+braucht einen **User**-API-Token (Daemon-Keys dürfen VLANs nicht
+anfassen) — Settings → API Keys, inline in `ExtraFileContents`:
+
+```json
+"github.com/consolving/gokrazy-scanopy/cmd/vlansync": {
+    "CommandLineFlags": [
+        "-server-url=https://scanopy.example.com",
+        "-wifi-vlan=31"
+    ],
+    "ExtraFileContents": {
+        "/etc/scanopy/user-api-key": "<user api token, inline>"
+    }
+}
+```
+
+`-wifi-vlan=31` ordnet das WLAN-Subnet (10.0.31.0/25) dem gleichen
+VLAN zu wie das lan4-Subnet (10.0.31.128/25). Der Sync läuft alle
+30 Minuten und verträgt sich mit dem Daemon.
+
 ## Rebuilding the daemon binary
 
 There are no official `armv7` release assets upstream, so the binary
