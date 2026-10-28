@@ -31,7 +31,7 @@ be reachable on the router itself.
     "PackageConfig": {
         "github.com/consolving/gokrazy-scanopy/cmd/scnopy": {
             "CommandLineFlags": [
-                "-interfaces=br-vlan1,br-vlan20,br-vlan30,br-vlan31,wlan0"
+                "-server-url=https://scanopy.example.com"
             ],
             "ExtraFilePaths": {
                 "/usr/local/bin/scanopy-daemon": "scanopy-daemon"
@@ -43,6 +43,14 @@ be reachable on the router itself.
     }
 }
 ```
+
+`-server-url` ist die URL deiner Scanopy-Instanz; ohne Flag nimmt der
+Wrapper Scanopys dokumentierten Default (`http://127.0.0.1:60072`).
+`SCANOPY_INTERFACES` lässt sich per `-interfaces=` setzen — auf dem
+BPI-R1 aber weglassen: die VLAN-Bridges entstehen erst nach dem Boot,
+und der Daemon bindet seine Server-Verbindung sonst an ein noch nicht
+existierendes Interface. Die gescannten Subnets regelt man serverseitig
+in den Daemon-Einstellungen.
 
 `scanopy-daemon` lives in this repository and is staged into the image
 via `ExtraFilePaths`. The API key goes **inline** into
