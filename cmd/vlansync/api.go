@@ -70,9 +70,7 @@ type subnet struct {
 }
 
 func (c *client) listSubnets() ([]subnet, error) {
-	var out []subnet
-	err := c.do("GET", "/api/v1/subnets", nil, &out)
-	return out, err
+	return fetchAll[subnet](c, "/api/v1/subnets")
 }
 
 type vlan struct {
@@ -89,9 +87,26 @@ type vlan struct {
 }
 
 func (c *client) listVlans() ([]vlan, error) {
-	var out []vlan
-	err := c.do("GET", "/api/v1/vlans", nil, &out)
-	return out, err
+	return fetchAll[vlan](c, "/api/v1/vlans")
+}
+
+// fetchAll walks the paginated list endpoints (default page size 50).
+func fetchAll[T any](c *client, path string) ([]T, error) {
+	var all []T
+	for page := 1; page < 100; page++ {
+		var batch []T
+		if err := c.do("GET", fmt.Sprintf("%s?page=%d", path, page), nil, &batch); err != nil {
+			return nil, err
+		}
+		if len(batch) == 0 {
+			break
+		}
+		all = append(all, batch...)
+		if len(batch) < 50 {
+			break
+		}
+	}
+	return all, nil
 }
 
 func (c *client) createVlan(v vlan) error {
