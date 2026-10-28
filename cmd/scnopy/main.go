@@ -6,31 +6,49 @@
 // daemon binary. All daemon state (daemon ID, host ID, config.json)
 // lives in a persistent directory under /perm so it survives gokrazy
 // OTA updates and reboots.
+//
+// Before exec it waits until networking is up: the daemon snapshots
+// its interface list at startup, and if it starts before
+// gokrazy-router has created the VLAN bridges, scanopy drops every
+// subnet behind them on the next discovery.
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
 )
 
-func mustRead(path string) []byte {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		log.Fatalf("scnopy: reading %s: %v", path, err)
-	}
-	return b
+// routerConfig is the subset of gokrazy-router.json vlansync/scnopy
+// need: the vlan ids define the expected bridge names (br-vlan<id>).
+type routerConfig struct {
+	Vlans []struct {
+		ID int `json:"id"`
+	} `json:"vlans"`
 }
 
-// networkReady reports whether the routing table contains a default
-// route, i.e. WAN DHCP has finished and gokrazy-router has wired up
-// its uplink.
-func networkReady() bool {
+func loadRouterConfig(path string) (*routerConfig, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	rc := &routerConfig{}
+	if err := json.Unmarshal(b, rc); err != nil {
+		return nil, err
+	}
+	return rc, nil
+}
+
+// hasDefaultRoute reports whether /proc/net/route contains a default
+// route, i.e. WAN DHCP has finished.
+func hasDefaultRoute() bool {
 	data, err := os.ReadFile("/proc/net/route")
 	if err != nil {
 		return false
@@ -44,22 +62,28 @@ func networkReady() bool {
 	return false
 }
 
+func mustRead(path string) []byte {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		log.Fatalf("scnopy: reading %s: %v", path, err)
+	}
+	return b
+}
+
 func main() {
 	var (
-		binary     = flag.String("binary", "/usr/local/bin/scanopy-daemon", "path to the scanopy-daemon binary")
-		serverURL  = flag.String("server-url", "http://127.0.0.1:60072", "Scanopy server URL")
-		apiKeyFile = flag.String("api-key-file", "/etc/scanopy/daemon-api-key", "file containing the daemon API key")
-		name       = flag.String("name", "bpi-r1", "daemon name as shown in the Scanopy UI")
-		interfaces = flag.String("interfaces", "", "comma-separated interfaces to scan (empty: all)")
-		configDir  = flag.String("config-dir", "/perm/scanopy", "persistent config/state directory")
-		logLevel   = flag.String("log-level", "info", "daemon log level")
-		waitIfaces = flag.Bool("wait-interfaces", true, "wait until networking is up (default route present) before exec")
+		binary       = flag.String("binary", "/usr/local/bin/scanopy-daemon", "path to the scanopy-daemon binary")
+		serverURL    = flag.String("server-url", "http://127.0.0.1:60072", "Scanopy server URL")
+		apiKeyFile   = flag.String("api-key-file", "/etc/scanopy/daemon-api-key", "file containing the daemon API key")
+		name         = flag.String("name", "bpi-r1", "daemon name as shown in the Scanopy UI")
+		interfaces   = flag.String("interfaces", "", "comma-separated interfaces to scan (empty: all)")
+		configDir    = flag.String("config-dir", "/perm/scanopy", "persistent config/state directory")
+		routerConfig = flag.String("router-config", "/etc/gokrazy-router.json", "gokrazy-router config (bridges derived from vlans[].id)")
+		logLevel     = flag.String("log-level", "info", "daemon log level")
+		waitIfaces   = flag.Bool("wait-interfaces", true, "wait until networking is up (default route + router vlan bridges) before exec")
 	)
 	flag.Parse()
 
-	if _, err := os.Stat(*apiKeyFile); err != nil {
-		log.Fatalf("scnopy: reading %s: %v", *apiKeyFile, err)
-	}
 	key := strings.TrimSpace(string(mustRead(*apiKeyFile)))
 	if key == "" || strings.Contains(key, "PLACE_") {
 		log.Fatalf("scnopy: %s contains no daemon API key — create a daemon in the Scanopy UI (Discover > Daemons) and store its key in this file", *apiKeyFile)
@@ -73,6 +97,37 @@ func main() {
 		log.Fatalf("scnopy: chmod %s: %v", *configDir, err)
 	}
 
+	// Wait until the WAN default route exists and every VLAN bridge
+	// from the router config is present. The daemon snapshots its
+	// interfaces at startup; starting too early makes scanopy drop all
+	// subnets behind the not-yet-existing bridges.
+	if *waitIfaces {
+		deadline := time.Now().Add(5 * time.Minute)
+		for {
+			var missing []string
+			if !hasDefaultRoute() {
+				missing = append(missing, "default-route")
+			}
+			if rc, err := loadRouterConfig(*routerConfig); err == nil {
+				for _, v := range rc.Vlans {
+					b := "br-vlan" + strconv.Itoa(v.ID)
+					if _, err := os.Stat(filepath.Join("/sys/class/net", b)); err != nil {
+						missing = append(missing, b)
+					}
+				}
+			}
+			if len(missing) == 0 {
+				break
+			}
+			if time.Now().After(deadline) {
+				log.Printf("scnopy: network/bridges still incomplete after 5m (missing: %s) — starting anyway", strings.Join(missing, ","))
+				break
+			}
+			log.Printf("scnopy: waiting for network (missing: %s)", strings.Join(missing, ","))
+			time.Sleep(2 * time.Second)
+		}
+	}
+
 	env := append(os.Environ(),
 		"SCANOPY_SERVER_URL="+*serverURL,
 		"SCANOPY_DAEMON_API_KEY="+key,
@@ -82,26 +137,6 @@ func main() {
 	)
 	if *interfaces != "" {
 		env = append(env, "SCANOPY_INTERFACES="+*interfaces)
-	}
-
-	// The daemon resolves its server connection at startup. On gokrazy
-	// the WAN address arrives via DHCP a few seconds after boot and the
-	// VLAN bridges appear when gokrazy-router has configured them.
-	// Without this wait every startup announcement fails and the daemon
-	// permanently enters its NOT ready state.
-	if *waitIfaces {
-		deadline := time.Now().Add(5 * time.Minute)
-		for {
-			if networkReady() {
-				break
-			}
-			if time.Now().After(deadline) {
-				log.Printf("scnopy: no usable network after 5m — starting anyway")
-				break
-			}
-			log.Printf("scnopy: waiting for network (default route + global IPv4)")
-			time.Sleep(2 * time.Second)
-		}
 	}
 
 	if _, err := os.Stat(*binary); err != nil {
