@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 )
 
 func mustRead(path string) []byte {
@@ -24,6 +25,23 @@ func mustRead(path string) []byte {
 		log.Fatalf("scnopy: reading %s: %v", path, err)
 	}
 	return b
+}
+
+// networkReady reports whether the routing table contains a default
+// route, i.e. WAN DHCP has finished and gokrazy-router has wired up
+// its uplink.
+func networkReady() bool {
+	data, err := os.ReadFile("/proc/net/route")
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(data), "\n")[1:] {
+		f := strings.Fields(line)
+		if len(f) >= 8 && f[1] == "00000000" && f[7] == "00000000" {
+			return true
+		}
+	}
+	return false
 }
 
 func main() {
@@ -35,6 +53,7 @@ func main() {
 		interfaces = flag.String("interfaces", "", "comma-separated interfaces to scan (empty: all)")
 		configDir  = flag.String("config-dir", "/perm/scanopy", "persistent config/state directory")
 		logLevel   = flag.String("log-level", "info", "daemon log level")
+		waitIfaces = flag.Bool("wait-interfaces", true, "wait until networking is up (default route present) before exec")
 	)
 	flag.Parse()
 
@@ -63,6 +82,26 @@ func main() {
 	)
 	if *interfaces != "" {
 		env = append(env, "SCANOPY_INTERFACES="+*interfaces)
+	}
+
+	// The daemon resolves its server connection at startup. On gokrazy
+	// the WAN address arrives via DHCP a few seconds after boot and the
+	// VLAN bridges appear when gokrazy-router has configured them.
+	// Without this wait every startup announcement fails and the daemon
+	// permanently enters its NOT ready state.
+	if *waitIfaces {
+		deadline := time.Now().Add(5 * time.Minute)
+		for {
+			if networkReady() {
+				break
+			}
+			if time.Now().After(deadline) {
+				log.Printf("scnopy: no usable network after 5m — starting anyway")
+				break
+			}
+			log.Printf("scnopy: waiting for network (default route + global IPv4)")
+			time.Sleep(2 * time.Second)
+		}
 	}
 
 	if _, err := os.Stat(*binary); err != nil {
