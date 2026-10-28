@@ -82,7 +82,7 @@ type vlan struct {
 	Description  *string  `json:"description,omitempty"`
 	SiteID       string   `json:"site_id"`
 	OrgID        string   `json:"organization_id"`
-	Source       string   `json:"source"`
+	Source       any      `json:"source,omitempty"`
 	SubnetIDs    []string `json:"subnet_ids"`
 	InterfaceIDs []string `json:"interface_ids"`
 }
@@ -103,7 +103,7 @@ func (c *client) createSubnet(cidr, siteID, subnetType string) error {
 		"name":        cidr,
 		"site_id":     siteID,
 		"subnet_type": subnetType,
-		"source":      "Manual",
+		"source":      map[string]any{"type": "Manual"},
 	}
 	return c.do("POST", "/api/v1/subnets", body, nil)
 }

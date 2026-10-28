@@ -207,7 +207,7 @@ func syncOnce(serverURL, token, routerConf string, wifiVlan int, logLevel string
 			Name:         t.Name,
 			SiteID:       siteID,
 			OrgID:        orgID,
-			Source:       "Manual",
+			Source:       map[string]any{"type": "Manual"},
 			SubnetIDs:    subnetUUIDs,
 			InterfaceIDs: ifaceUUIDs,
 		}); err != nil {
